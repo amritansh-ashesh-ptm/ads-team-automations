@@ -21,18 +21,26 @@ def main():
             channel="chrome",
             headless=False,
             accept_downloads=True,
+            # Pin the viewport so the headed login session renders the same
+            # responsive layout as the headless runs (generate_meeting_report.py,
+            # inspect_page.py) — a headed window's actual OS size can otherwise
+            # differ and collapse the sidebar into a layout without this marker.
+            viewport={"width": 1280, "height": 800},
         )
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto(config.REPORTS_URL)
 
         print("\n>> Click 'Continue with Google' and sign in.")
         print(">> Waiting for you to reach the reports page (not the login page)...")
-        time.sleep(4)  # let the initial client-side redirect to /login settle first
+        # Check real page content, not the URL: the SPA shows the /phoenix/reports
+        # URL for a few seconds while it bootstraps even when NOT logged in, before
+        # its JS checks the session and redirects to /login. A URL (or URL-timing)
+        # check can't tell bootstrap-in-progress from actually-authenticated —
+        # only the presence of authenticated-only DOM content can.
+        report_pane_toggle = page.locator("a.cursor.ps-4")
         deadline = time.time() + TIMEOUT_S
         while time.time() < deadline:
-            url = page.url
-            if "/phoenix/reports" in url and "login" not in url:
-                time.sleep(2)  # let cookies settle
+            if "/login" not in page.url and report_pane_toggle.count() > 0:
                 print(">> Detected reports page. Session saved.")
                 ctx.close()
                 return
