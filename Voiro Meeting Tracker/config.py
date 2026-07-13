@@ -25,6 +25,11 @@ SHEET_TAB = "Raw MT Data"
 # Service-account creds for writing to the sheet.
 SA_CREDS = BASE / "service-account.json"
 
+# Google account used for the lightweight re-auth click-through (see
+# ensure_logged_in in generate_meeting_report.py) when Google's periodic
+# OAuth reauth screen appears — never needs a password, just this account tile.
+GOOGLE_ACCOUNT_EMAIL = "amritansh.ashesh@paytm.com"
+
 # Meeting Report generation settings.
 SALESPERSON = "Anshul Batra"  # top of hierarchy; report includes everyone under them
 START_DATE = datetime.date(2026, 6, 1)  # initiative start date — fixed, doesn't move

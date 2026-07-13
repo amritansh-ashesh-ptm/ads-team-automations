@@ -224,11 +224,51 @@ def download_row(page, row):
     return dest
 
 
+def ensure_logged_in(page):
+    """Google periodically requires re-confirming the OAuth grant (no
+    password/2FA, just re-picking the account) even while the underlying
+    Google session is still valid — this handles that click-through. If a
+    real email/password prompt shows up instead, the Google session itself
+    has expired and this raises instead of guessing at credentials."""
+    if "login" not in page.url:
+        return
+
+    page.get_by_text("Continue with Google").click(timeout=DEFAULT_ACTION_TIMEOUT_MS)
+
+    try:
+        page.get_by_text(config.GOOGLE_ACCOUNT_EMAIL).click(timeout=10_000)
+    except Exception:
+        raise RuntimeError(
+            "Google account chooser didn't appear (full email/password/2FA "
+            "prompt instead) — the Google session itself expired. Run login.py."
+        )
+
+    # Google shows one of a few confirm screens here depending on which kind
+    # of reauth this is — "Continue" (session refresh) or "Allow" (full scope
+    # consent) — or sometimes skips straight through. Try both, best-effort.
+    for button_name in ("Continue", "Allow"):
+        try:
+            page.get_by_role("button", name=button_name).click(timeout=5_000)
+            break
+        except Exception:
+            continue
+
+    # The button click kicks off Voiro's own SSO token exchange (a redirect
+    # through /phoenix/systems/login/sso#access_token=... before it lands on
+    # /reports) — re-navigating immediately races that in-flight redirect and
+    # can land back on the login page before the session cookie is actually set.
+    page.wait_for_timeout(5_000)
+    page.goto(config.REPORTS_URL, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT_MS)
+    if "login" in page.url:
+        raise RuntimeError("Re-auth click-through completed but still not logged in.")
+
+
 def attempt_generate_and_download(page):
     """One full pass: load the reports page fresh, fill the form, generate,
     wait for a confirmed-fresh Ready row, download. Raises on any failure —
     the caller decides whether to retry."""
     page.goto(config.REPORTS_URL, wait_until="networkidle", timeout=PAGE_LOAD_TIMEOUT_MS)
+    ensure_logged_in(page)
 
     open_report_pane(page)
     select_report_type(page, REPORT_TYPE)
