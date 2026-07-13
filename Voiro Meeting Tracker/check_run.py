@@ -20,8 +20,12 @@ ALERT_AFTER_MINUTE = 25  # 20 min after the 10:05 scheduled run
 
 
 def notify(message):
+    # AppleScript string literal — embedded backslashes/quotes (e.g. from a
+    # Playwright locator repr like `"a.cursor.ps-4"`) must be escaped or
+    # osascript throws a syntax error that subprocess(check=False) swallows.
+    safe_message = message.replace("\\", "\\\\").replace('"', '\\"')
     subprocess.run(
-        ["osascript", "-e", f'display notification "{message}" with title "Voiro Meeting Tracker"'],
+        ["osascript", "-e", f'display notification "{safe_message}" with title "Voiro Meeting Tracker"'],
         check=False,
     )
 
@@ -60,7 +64,7 @@ def main():
             problem = None
 
     if problem:
-        notify(f"Today's report run {problem}. Run 'voiro-run' in a terminal to trigger it manually.")
+        notify(f"Today's report run {problem}. Run 'automations' in a terminal to trigger it manually.")
         config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
         mark_alerted(today_str)
 

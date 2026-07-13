@@ -38,6 +38,7 @@ def main():
         check_run.notify("You're all set! The Voiro Meeting Tracker has been updated successfully")
     except Exception as e:
         _write_status("failure", error=repr(e))
+        check_run.notify(f"Today's report run failed: {e!r}. Run 'automations' in a terminal to trigger it manually.")
         raise
 
 
