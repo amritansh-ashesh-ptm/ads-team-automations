@@ -52,6 +52,12 @@ DOWNLOAD_TIMEOUT_MS = 60_000
 MAX_ATTEMPTS = 3
 RETRY_BACKOFF_S = 5
 
+
+class ManualLoginRequired(RuntimeError):
+    """The Google session itself needs a human to run login.py — retrying
+    just means more automated hits against Google's login, which is what
+    risks getting flagged in the first place. Not retryable."""
+
 # The date-range popup is a single <bs-daterangepicker-container> appended
 # directly to <body> — see module docstring point 3.
 _CAL_SCOPE_JS = "document.querySelector('bs-daterangepicker-container')"
@@ -238,9 +244,25 @@ def ensure_logged_in(page):
     try:
         page.get_by_text(config.GOOGLE_ACCOUNT_EMAIL).click(timeout=10_000)
     except Exception:
-        raise RuntimeError(
+        raise ManualLoginRequired(
             "Google account chooser didn't appear (full email/password/2FA "
             "prompt instead) — the Google session itself expired. Run login.py."
+        )
+
+    # The click above can also "succeed" (no exception) but land somewhere
+    # other than the consent screen — observed variants: Google's identifier
+    # (type-your-email) page when the account's underlying session expired,
+    # and a "/signin/rejected" page when Google's anomaly detection balks at
+    # the automated sign-in itself. Catch both here instead of falling through
+    # to the Continue/Allow probe (which times out) and a misleading generic
+    # error. (.click() doesn't wait for the resulting navigation to land, so
+    # give it a few seconds before reading page.url.)
+    page.wait_for_timeout(8_000)
+    if "identifier" in page.url or "rejected" in page.url:
+        raise ManualLoginRequired(
+            f"Account chooser led to a sign-in failure page ({page.url}), not "
+            "consent — either the Google session expired or Google's bot "
+            "detection rejected the automated sign-in. Run login.py."
         )
 
     # Google shows one of a few confirm screens here depending on which kind
@@ -303,6 +325,12 @@ def main():
                 print("DONE:", path)
                 ctx.close()
                 return path
+            except ManualLoginRequired as e:
+                # Not retryable — retrying just means more automated hits
+                # against Google's login, which risks getting flagged harder.
+                print(f"Attempt {attempt} failed ({e!r}) — needs a human, not retrying.")
+                ctx.close()
+                raise
             except Exception as e:
                 last_error = e
                 print(f"Attempt {attempt} failed ({e!r}) — retrying from scratch (reload + refill).")
