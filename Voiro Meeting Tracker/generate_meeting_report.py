@@ -129,6 +129,21 @@ def _drill_start_day(page, target_date):
     page.wait_for_timeout(600)
 
 
+def _pick_end_pane_day_cell(day_cells, day_str):
+    """Rightmost of the matched cells is the end pane. When start_date's month
+    has fewer days than end_date.day (e.g. start in June, end_date the 31st),
+    the start pane has no matching cell at all — the lone hit is unambiguously
+    the end pane's, since the end pane always shows "today"'s month and
+    end_date is always today (see config.END_DATE)."""
+    if not day_cells:
+        raise RuntimeError(
+            f"End-pane day '{day_str}' not visible in either calendar pane — "
+            "end_date is outside the default displayed month; a real drill "
+            "for the end pane needs implementing for this case."
+        )
+    return day_cells[-1]
+
+
 def set_date_range(page, start_date, end_date):
     page.locator("#dateRange").click()
     page.wait_for_timeout(800)
@@ -150,13 +165,7 @@ def set_date_range(page, start_date, end_date):
             .map(e => {{ const r=e.getBoundingClientRect(); return {{x:r.x,y:r.y,w:r.width,h:r.height}}; }})
             .sort((a,b)=>a.x-b.x)"""
     )
-    if len(day_cells) < 2:
-        raise RuntimeError(
-            f"Expected end-pane day '{day_str}' already visible without redrilling "
-            f"(found {len(day_cells)} candidates) — end_date is outside the default "
-            "displayed month; a real drill for the end pane needs implementing for this case."
-        )
-    dc = day_cells[-1]  # right = end pane
+    dc = _pick_end_pane_day_cell(day_cells, day_str)
     page.mouse.click(dc["x"] + dc["w"] / 2, dc["y"] + dc["h"] / 2)
     page.wait_for_timeout(600)
 
