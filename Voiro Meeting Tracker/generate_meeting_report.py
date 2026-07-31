@@ -245,6 +245,23 @@ def ensure_logged_in(page):
     Google session is still valid — this handles that click-through. If a
     real email/password prompt shows up instead, the Google session itself
     has expired and this raises instead of guessing at credentials."""
+    # The SPA shows /phoenix/reports in the URL for a few seconds while it
+    # bootstraps even when NOT logged in, before its JS checks the session
+    # and redirects to /login (same race login.py's landing check works
+    # around) — trusting the URL right after goto can misread "about to
+    # redirect to login" as "logged in" and send us straight into
+    # open_report_pane, which then hangs waiting for a toggle that's never
+    # coming. Wait briefly for real proof: either the toggle shows up (truly
+    # logged in) or the URL actually flips to /login (needs re-auth).
+    report_pane_toggle = page.locator("a.cursor.ps-4")
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if report_pane_toggle.count() > 0:
+            return
+        if "login" in page.url:
+            break
+        time.sleep(0.5)
+
     if "login" not in page.url:
         return
 
