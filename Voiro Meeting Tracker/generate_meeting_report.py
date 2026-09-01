@@ -343,19 +343,29 @@ def attempt_generate_and_download(page):
     return download_row(page, row)
 
 
+def _launch_context(p):
+    ctx = p.chromium.launch_persistent_context(
+        user_data_dir=str(config.PROFILE_DIR),
+        channel="chrome",
+        headless=True,
+        accept_downloads=True,
+    )
+    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    page.set_default_timeout(DEFAULT_ACTION_TIMEOUT_MS)
+    return ctx, page
+
+
 def main():
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(
-            user_data_dir=str(config.PROFILE_DIR),
-            channel="chrome",
-            headless=True,
-            accept_downloads=True,
-        )
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.set_default_timeout(DEFAULT_ACTION_TIMEOUT_MS)
-
         last_error = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            # A fresh context every attempt, not just the first — Chrome has
+            # been observed to die mid-attempt (TargetClosedError right after
+            # a successful download, 2026-08-28 and 2026-09-01) with no other
+            # symptom. Reusing that same dead context for the remaining
+            # retries guaranteed they'd fail too; the persistent profile on
+            # disk means relaunching never loses the Google session.
+            ctx, page = _launch_context(p)
             try:
                 print(f"--- Attempt {attempt}/{MAX_ATTEMPTS} ---")
                 path = attempt_generate_and_download(page)
@@ -366,23 +376,21 @@ def main():
                 # Not retryable — retrying just means more automated hits
                 # against Google's login, which risks getting flagged harder.
                 print(f"Attempt {attempt} failed ({e!r}) — needs a human, not retrying.")
-                ctx.close()
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
                 raise
             except Exception as e:
                 last_error = e
                 print(f"Attempt {attempt} failed ({e!r}) — retrying from scratch (reload + refill).")
-                # Close anything the failed attempt may have popped open
-                # (e.g. a stray Google/download tab) but keep the session —
-                # the persistent profile means no re-login is needed.
-                for extra_page in ctx.pages[1:]:
-                    try:
-                        extra_page.close()
-                    except Exception:
-                        pass
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
                 if attempt < MAX_ATTEMPTS:
                     time.sleep(RETRY_BACKOFF_S)
 
-        ctx.close()
         raise RuntimeError(f"All {MAX_ATTEMPTS} attempts failed. Last error: {last_error!r}")
 
 
