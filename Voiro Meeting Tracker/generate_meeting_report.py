@@ -129,45 +129,56 @@ def _drill_start_day(page, target_date):
     page.wait_for_timeout(600)
 
 
-def _pick_end_pane_day_cell(day_cells, day_str):
-    """Rightmost of the matched cells is the end pane. When start_date's month
-    has fewer days than end_date.day (e.g. start in June, end_date the 31st),
-    the start pane has no matching cell at all — the lone hit is unambiguously
-    the end pane's, since the end pane always shows "today"'s month and
-    end_date is always today (see config.END_DATE)."""
-    if not day_cells:
-        raise RuntimeError(
-            f"End-pane day '{day_str}' not visible in either calendar pane — "
-            "end_date is outside the default displayed month; a real drill "
-            "for the end pane needs implementing for this case."
+def _month_nav_direction(shown, target):
+    """Which arrow (if any) moves the end pane's shown (year, month) tuple
+    toward target's. Pure so it's testable without a real page."""
+    if shown == target:
+        return None
+    return "next" if target > shown else "previous"
+
+
+def _drill_end_day(page, target_date):
+    """Right (end) pane: click its own next/previous month arrows — each
+    <bs-days-calendar-view> navigates independently — until its header shows
+    the target month/year, then click the target day. Scoped to the second
+    pane throughout, so it can't collide with whatever month the start pane
+    is showing even when start and end are more than a month apart (the
+    previous shortcut assumed the end pane already showed end_date's month
+    by default, which broke once start/end crossed a 2-month gap)."""
+    end_pane = page.locator("bs-days-calendar-view").nth(1)
+    target = (target_date.year, target_date.month)
+    for _ in range(36):  # generous ceiling; a stuck header would otherwise loop forever
+        month_name, year = page.evaluate(
+            """(pane) => {
+                const btns = pane.querySelectorAll('button.current span');
+                return [btns[0].textContent.trim(), parseInt(btns[1].textContent.trim())];
+            }""",
+            end_pane.element_handle(),
         )
-    return day_cells[-1]
+        shown = (year, datetime.datetime.strptime(month_name, "%B").month)
+        direction = _month_nav_direction(shown, target)
+        if direction is None:
+            break
+        end_pane.locator(f"button.{direction}").click()
+        page.wait_for_timeout(400)
+    else:
+        raise RuntimeError(f"End pane didn't reach {target_date:%B %Y} after 36 navigation clicks")
+
+    day_str = str(target_date.day)
+    day_cell = end_pane.locator(
+        f"xpath=.//span[normalize-space(text())='{day_str}' and not(contains(@class,'is-other-month'))]"
+    )
+    if day_cell.count() != 1:
+        raise RuntimeError(f"Expected exactly 1 end-pane day-{day_str} cell after drilling, found {day_cell.count()}")
+    day_cell.first.click()
+    page.wait_for_timeout(600)
 
 
 def set_date_range(page, start_date, end_date):
     page.locator("#dateRange").click()
     page.wait_for_timeout(800)
     _drill_start_day(page, start_date)
-
-    # ponytail: after the start-pane drills to its day grid, the end-pane
-    # snaps back to day-view too, showing whatever it was already on (the
-    # picker's own default, e.g. "This Month"). We only click its day
-    # directly rather than re-drilling year/month for it — verified to work
-    # when end_date falls inside that already-shown month (true for
-    # "today", since the default range always includes today). If a caller
-    # ever needs an end_date outside the default month, this needs a real
-    # year->month->day drill for the end pane added back in — untested for
-    # that case.
-    day_str = str(end_date.day)
-    day_cells = page.evaluate(
-        f"""() => Array.from({_CAL_SCOPE_JS}.querySelectorAll('*'))
-            .filter(e => e.children.length===0 && e.textContent.trim()==='{day_str}' && !e.className.includes('is-other-month'))
-            .map(e => {{ const r=e.getBoundingClientRect(); return {{x:r.x,y:r.y,w:r.width,h:r.height}}; }})
-            .sort((a,b)=>a.x-b.x)"""
-    )
-    dc = _pick_end_pane_day_cell(day_cells, day_str)
-    page.mouse.click(dc["x"] + dc["w"] / 2, dc["y"] + dc["h"] / 2)
-    page.wait_for_timeout(600)
+    _drill_end_day(page, end_date)
 
 
 def read_report_name(page):
